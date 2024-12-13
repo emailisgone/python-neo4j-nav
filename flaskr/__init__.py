@@ -32,6 +32,17 @@ def create_app():
     def runQuery(query, parameters=None):
         with driver.session() as session:
             return session.run(query, parameters=parameters).data()
+        
+    def initIndexes():
+        with driver.session() as session:
+            session.run("CREATE INDEX clientIdIndex IF NOT EXISTS FOR (c:Client) ON (c.clientId)")
+            session.run("CREATE INDEX clientEmailIndex IF NOT EXISTS FOR (c:Client) ON (c.email)")
+            session.run("CREATE INDEX licensePlateIndex IF NOT EXISTS FOR (v:Vehicle) ON (v.licensePlate)")
+            session.run("CREATE INDEX tripIdIndex IF NOT EXISTS FOR (t:Trip) ON (t.tripId)")
+            session.run("CREATE INDEX tripVehIdIndex IF NOT EXISTS FOR (t:Trip) ON (t.vehicleId)")
+            session.run("CREATE INDEX posTripIdIndex IF NOT EXISTS FOR (p:Position) ON (p.tripId)")
+
+    initIndexes()
 
     clientCount = runQuery(
         """
@@ -51,7 +62,7 @@ def create_app():
         if not firstName or not lastName or not email or not birthDate or firstName.strip()=="" or lastName.strip()=="" or email.strip()=="" or birthDate.strip()=="":
             return jsonify("Could not register the client: mandatory attributes are missing."), 400
 
-        generatedId = firstName[:3] + lastName[:3] + str(totalClientCount+1)
+        generatedId = (firstName[:3]+lastName[:3]).lower() + str(totalClientCount+1)
 
         result = runQuery(
             """
@@ -274,19 +285,11 @@ def create_app():
         if not positions:
             return jsonify("Trip or positions not found."), 404
 
-        startPos = positions[0]['start']
-        endPos = positions[0]['lastPos']
-        startTimeEp = positions[0]['startTimeEp']
+        startPos, endPos, startTimeEp = positions[0]['start'], positions[0]['lastPos'], positions[0]['startTimeEp']
 
-        # Calculate trip length using haversine
-        trip_length = haversine(
-            startPos['latitude'], 
-            startPos['longitude'],
-            endPos['latitude'],
-            endPos['longitude']
-        )
+        tripLength = haversine(startPos['latitude'], startPos['longitude'], endPos['latitude'], endPos['longitude'])
 
-        duration = (stopTimeEp - startTimeEp)/3600
+        duration = (stopTimeEp-startTimeEp)/3600
 
         result = runQuery(
             """
@@ -302,7 +305,7 @@ def create_app():
                 v.totalTripDuration = COALESCE(v.totalTripDuration, 0) + $duration
             RETURN t
             """,
-            {"tripId": tripId, "stopTime": stopTimeEp, "length": trip_length, "duration": duration}
+            {"tripId": tripId, "stopTime": stopTimeEp, "length": tripLength, "duration": duration}
         )
 
         if not result:
@@ -462,4 +465,3 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     app.run(host='127.0.0.1')
-    
